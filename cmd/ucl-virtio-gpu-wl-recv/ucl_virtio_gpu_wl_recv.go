@@ -52,6 +52,7 @@ func main() {
 		screen       string
 		port         string
 		initialColor string
+		appId        string
 	)
 
 	flag.BoolVar(&verbose, "v", true, "verbose info log")
@@ -61,6 +62,7 @@ func main() {
 	flag.StringVar(&screen, "s", "1920x1080@0,0", "remote-virtio-gpu reciever screen config")
 	flag.StringVar(&port, "P", "55667", "specify remote-virtio-gpu reciever port")
 	flag.StringVar(&initialColor, "B", "0x33333333", "remote-virtio-gpu reciever color config")
+	flag.StringVar(&appId, "a", "", "remote-virtio-gpu reciever application id")
 	flag.Parse()
 
 	xdgRuntimeDir := ucl.GetEnv("XDG_RUNTIME_DIR", "/run/user/1000")
@@ -97,6 +99,11 @@ func main() {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
+	if appId != "" {
+		env_app_id := "XDG_TOPLEVEL_FALLBACK_APP_ID=" + appId
+		cmd.Env = append(cmd.Env, env_app_id)
+	}
 
 	err = cmd.Start()
 	if err != nil {

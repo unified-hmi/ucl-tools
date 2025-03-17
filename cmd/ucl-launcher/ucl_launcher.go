@@ -46,6 +46,7 @@ type frontendParams_t struct {
 
 type backendParams_t struct {
 	IviSurfaceId       *int   `json:"ivi_surface_id"`
+	AppId              string `json:"app_id"`
 	ScanOutX           int    `json:"scanout_x"`
 	ScanOutY           int    `json:"scanout_y"`
 	ScanOutW           int    `json:"scanout_w"`
@@ -172,6 +173,10 @@ func makeReceiverCmdParams(uclComm uclCommand, makeParam string, r receiver_t) s
 
 	if rparam.IviSurfaceId != nil {
 		makeParam = makeParam + " -S " + strconv.Itoa(*rparam.IviSurfaceId)
+	}
+
+	if rparam.AppId != "" {
+		makeParam = makeParam + " -a " + rparam.AppId
 	}
 
 	return makeParam
