@@ -20,36 +20,15 @@
 GO?=go
 GOBUILDFLAGS?=-v
 
-###linux
-GOOS?=linux
-
-###################
-
-###x86_64 64-bit
-GOARCH?=amd64
-
-###arm64 64-bit
-#GOARCH?=arm64
-
-ifeq ($(GOOS), linux)
-    ifeq ($(GOARCH), amd64)
-        LIBTARGET=gcc
-    else ifeq ($(GOARCH), arm64)
-        LIBTARGET=aarch64-linux-gnu-gcc
-    endif
-endif
-
 THIS_DIR=.
-
 UCLCLIENTSO?=libuclclient.so
 UCLCLIENTH?=libuclclient.h
 INSTALL_LIBDIR?=$(GOPATH)/pkg/libuclclient
 
-
 .PHONY: uclclientlib
 uclclientlib:
 	set -e ; \
-	GOOS=${GOOS} GOARCH=${GOARCH} CGO_ENABLED=1 CC=${LIBTARGET} $(GO) build -buildmode=c-shared -o $(UCLCLIENTSO) $(GOBUILDFLAGS) -ldflags '-extldflags "-Wl,-soname=$(UCLCLIENTSO)"' . ; \
+	GOOS=${GOOS} GOARCH=${GOARCH} CGO_ENABLED=1 CC=${CC} $(GO) build -buildmode=c-shared -o $(UCLCLIENTSO) $(GOBUILDFLAGS) -ldflags '-extldflags "-Wl,-soname=$(UCLCLIENTSO)"' . ; \
 	install -o $(USER) -g $(USER) -m 755 -d $(INSTALL_LIBDIR) ; \
 	install -o $(USER) -g $(USER) -m 664 $(UCLCLIENTSO) $(INSTALL_LIBDIR)/$(UCLCLIENTSO) ; \
 	install -o $(USER) -g $(USER) -m 664 $(UCLCLIENTH) $(INSTALL_LIBDIR)/$(UCLCLIENTH) ; \
@@ -79,3 +58,29 @@ doc: $(DOC_MODULES)
 clean: $(CLEAN_MODULES)
 	set -e;\
 	$(GO) clean -v .
+
+
+###################
+### custom build
+
+###linux
+CUSTOM_GOOS?=linux
+
+###x86_64 64-bit
+#CUSTOM_GOARCH?=amd64
+
+###arm64 64-bit
+CUSTOM_GOARCH?=arm64
+
+ifeq ($(CUSTOM_GOOS), linux)
+    ifeq ($(CUSTOM_GOARCH), amd64)
+        LIBTARGET=gcc
+    else ifeq ($(CUSTOM_GOARCH), arm64)
+        LIBTARGET=aarch64-linux-gnu-gcc
+    endif
+endif
+
+.PHONY: custom_uclclientlib
+custom_uclclientlib:
+	set -e ; \
+	GOOS=$(CUSTOM_GOOS) GOARCH=$(CUSTOM_GOARCH) CC=$(LIBTARGET) $(MAKE) uclclientlib
