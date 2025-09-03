@@ -58,29 +58,3 @@ doc: $(DOC_MODULES)
 clean: $(CLEAN_MODULES)
 	set -e;\
 	$(GO) clean -v .
-
-
-###################
-### custom build
-
-###linux
-CUSTOM_GOOS?=linux
-
-###x86_64 64-bit
-#CUSTOM_GOARCH?=amd64
-
-###arm64 64-bit
-CUSTOM_GOARCH?=arm64
-
-ifeq ($(CUSTOM_GOOS), linux)
-    ifeq ($(CUSTOM_GOARCH), amd64)
-        LIBTARGET=gcc
-    else ifeq ($(CUSTOM_GOARCH), arm64)
-        LIBTARGET=aarch64-linux-gnu-gcc
-    endif
-endif
-
-.PHONY: custom_uclclientlib
-custom_uclclientlib:
-	set -e ; \
-	GOOS=$(CUSTOM_GOOS) GOARCH=$(CUSTOM_GOARCH) CC=$(LIBTARGET) $(MAKE) uclclientlib

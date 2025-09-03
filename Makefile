@@ -75,8 +75,32 @@ $(CLEAN_MODULES):
 .PHONY:uclclientlib
 uclclientlib:
 	set -e;\
-	make GOOS=${GOOS} GOARCH=${GOARCH} LIBTARGET=${LIBTARGET} -C pkg/ucl-client-lib $@
+	make GOOS=${GOOS} GOARCH=${GOARCH} CC=${CC} -C pkg/ucl-client-lib $@
 
 .PHONY: dep
 dep:
 
+###################
+### custom build
+
+###linux
+CUSTOM_GOOS?=linux
+
+###x86_64 64-bit
+CUSTOM_GOARCH?=amd64
+
+###arm64 64-bit
+#CUSTOM_GOARCH?=arm64
+
+ifeq ($(CUSTOM_GOOS), linux)
+    ifeq ($(CUSTOM_GOARCH), amd64)
+        LIBTARGET=gcc
+    else ifeq ($(CUSTOM_GOARCH), arm64)
+        LIBTARGET=aarch64-linux-gnu-gcc
+    endif
+endif
+
+.PHONY: custom_all custom_install
+custom_all : custom_install
+custom_install : $(INSTALL_MODULES)
+	make GOOS=${CUSTOM_GOOS} GOARCH=${CUSTOM_GOARCH} CC=${LIBTARGET} uclclientlib
