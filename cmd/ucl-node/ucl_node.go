@@ -169,9 +169,6 @@ func getExecutableAppList(recvData []byte) (string, error) {
 		if err := json.Unmarshal(jsonBytes, &mJson); err != nil {
 			continue
 		}
-		if mJson["format_v1"].(map[string]interface{})["appli_name"] != dirName {
-			continue
-		}
 		if !validateAppInfo(mJson, nodes) {
 			continue
 		}
@@ -197,7 +194,7 @@ func ReadAppComm(appName string) ([]byte, error) {
 
 	jsonBytes, err := ioutil.ReadFile(fname)
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("ReadAll error: ", err))
+		return nil, err
 	}
 
 	return jsonBytes, nil
@@ -434,7 +431,7 @@ LOOP:
 		case sendMsg := <-sendLcmChan:
 			err := ucl.ConnWriteWithSize(conn, sendMsg)
 			if err != nil {
-				ELog.Printf("ERR ConnWriteWithSize : %s\n", err)
+				ELog.Printf("(task=%s) ERR ConnWriteWithSize : %s\n", commTaskCtx.AppName, err)
 				break LOOP
 			}
 
@@ -450,7 +447,7 @@ LOOP:
 					break LOOP
 				}
 			} else {
-				ILog.Printf("Disconnected from the LCM side")
+				ILog.Printf("(task=%s) Disconnected from the LCM side", commTaskCtx.AppName)
 				commTaskCtx.Cancel()
 				break LOOP
 			}
@@ -477,9 +474,9 @@ func dispatchComm(conn net.Conn) error {
 
 		appComm, err := ReadAppComm(string(recvBuf))
 		if err != nil {
-			ILog.Printf("getAppCmd: %s", err)
+			ILog.Printf("(task=%s) getAppCmd: %s", recvBuf, err)
 		} else {
-			DLog.Printf("getAppCmd: %s", appComm)
+			DLog.Printf("(task=%s) getAppCmd: %s", recvBuf, appComm)
 			ucl.ConnWriteWithSize(conn, appComm)
 		}
 

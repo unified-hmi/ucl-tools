@@ -29,6 +29,7 @@ const (
 	STAT_ExecSuccess = "Success"
 	STAT_ExecErr     = "Error"
 	STAT_ExecFin     = "Finish"
+	STAT_ExecBusy    = "Busy"
 	STAT_AppRunning  = "AppRunning"
 	STAT_AppStop     = "AppStop"
 )
@@ -81,7 +82,7 @@ func GetEnv(key string, fallback string) string {
 	return fallback
 }
 
-func GetIpAddrsOfAllInterfaces() ([]string, error) {
+func GetIpv4AddrsOfAllInterfaces() ([]string, error) {
 
 	var ipaddrs []string
 

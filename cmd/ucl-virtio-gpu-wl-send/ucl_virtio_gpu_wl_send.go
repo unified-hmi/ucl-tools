@@ -225,6 +225,7 @@ func reserveRvgpuIndex() int {
 				ELog.Println("Error opening/creating file:", err)
 				return -1
 			}
+			defer file.Close()
 
 			indexString := fmt.Sprintf("%d\n", cardN)
 			_, err = file.WriteString(indexString)

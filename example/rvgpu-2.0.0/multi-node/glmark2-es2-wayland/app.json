@@ -10,7 +10,8 @@
         "scanout_y": 0,
         "scanout_w": 1920,
         "scanout_h": 1080
-      }
+      },
+      "appli": "/usr/bin/glmark2-es2-wayland --fullscreen"
     },
     "receivers": [
       {
@@ -21,7 +22,7 @@
       },
       {
         "launcher": "host2",
-	"backend_params": {
+        "backend_params": {
           "listen_port": 36001
         }
       }

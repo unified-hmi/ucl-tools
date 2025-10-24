@@ -81,6 +81,7 @@ func ReadVScrnDef(vsdPath ...string) (*VScrnDef, error) {
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("%s %s", fname, err))
 	}
+	defer f.Close()
 
 	jsonBytes, err := ioutil.ReadAll(f)
 	if err != nil {
@@ -94,6 +95,66 @@ func ReadVScrnDef(vsdPath ...string) (*VScrnDef, error) {
 	}
 
 	return &vscrnDef, nil
+}
+
+func (vdef *VScrnDef) GetNodeIdByHostName(hostname string) (int, error) {
+
+	for _, r := range vdef.Nodes {
+		if hostname == r.HostName {
+			return r.NodeId, nil
+		}
+	}
+
+	return -1, errors.New("Cannot Find My NodeId from VScrnDef json")
+}
+
+func (vdef *VScrnDef) GetIpAddrByNodeIdAndIpCandidateList(ipAddrs []string, nodeId int) (string, error) {
+
+	for _, r := range vdef.Nodes {
+		if nodeId == r.NodeId {
+			for _, ipaddr := range ipAddrs {
+				if ipaddr == r.Ip {
+					return ipaddr, nil
+				}
+			}
+		}
+	}
+
+	return "0.0.0.0", errors.New("The acquired IP address does not exist in VScrnDef json")
+}
+
+func GetMyNodeId(vscrnDef *VScrnDef) (int, error) {
+	keyHostName, err := os.Hostname()
+	if err != nil {
+		return -1, err
+	}
+	nodeId, err := vscrnDef.GetNodeIdByHostName(keyHostName)
+	if err != nil {
+		return -1, err
+	}
+	return nodeId, nil
+}
+
+func GetMyIpv4Addr(vscrnDef *VScrnDef) (string, error) {
+
+	keyHostName, err := os.Hostname()
+	if err != nil {
+		return "", err
+	}
+
+	nodeId, err := vscrnDef.GetNodeIdByHostName(keyHostName)
+	if err != nil {
+		return "", err
+	}
+	ipAddrs, err := GetIpv4AddrsOfAllInterfaces()
+	if err != nil {
+		return "", err
+	}
+	ipAddr, err := vscrnDef.GetIpAddrByNodeIdAndIpCandidateList(ipAddrs, nodeId)
+	if err != nil {
+		return "", err
+	}
+	return ipAddr, nil
 }
 
 func GetIpAddr(nodeId int, vscrnDef *VScrnDef) (string, error) {
@@ -140,7 +201,7 @@ func GetNodeAddr(vscrnDef *VScrnDef) (string, error) {
 		return "", err
 	}
 
-	ipAddrs, err := GetIpAddrsOfAllInterfaces()
+	ipAddrs, err := GetIpv4AddrsOfAllInterfaces()
 	if err != nil {
 		return "", err
 	}
@@ -176,7 +237,9 @@ func GetLcmNodeAddr(vscrnDef *VScrnDef) (string, error) {
 
 	for _, node := range vscrnDef.Nodes {
 		if node.NodeId == vscrnDef.DistributedWindowSystem.LifeCycleManager.NodeId {
-			targetAddr = node.Ip + ":" + strconv.Itoa(vscrnDef.DistributedWindowSystem.LifeCycleManager.Port)
+			port := vscrnDef.DistributedWindowSystem.LifeCycleManager.Port
+			ipAddr := node.Ip
+			targetAddr = ipAddr + ":" + strconv.Itoa(port)
 			return targetAddr, nil
 		}
 	}

@@ -18,10 +18,13 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"google.golang.org/grpc"
 	"net"
 	"os"
 	"strconv"
@@ -30,6 +33,7 @@ import (
 	"time"
 	"ucl-tools/internal/ucl"
 	. "ucl-tools/internal/ulog"
+	"ucl-tools/proto/grpc/dcm"
 )
 
 var gVScrnDef *ucl.VScrnDef = nil
@@ -37,14 +41,28 @@ var gVScrnDef *ucl.VScrnDef = nil
 var commTaskCtxMu sync.Mutex
 var commTaskCtxMap = make(map[string]*ucl.CommTaskContext)
 
-func updateCommTaskCtxMap(appName string) error {
+func updateCommTaskCtxMap(appName string) (*ucl.CommTaskContext, error) {
 	defer commTaskCtxMu.Unlock()
 
 	commTaskCtxMu.Lock()
 	if _, exists := commTaskCtxMap[appName]; exists || appName == "" {
+		return nil, errors.New("ctxMap already exists: " + appName)
+	}
+	ctx := ucl.NewCommTaskCtx(appName)
+	commTaskCtxMap[appName] = ctx
+
+	return ctx, nil
+}
+
+func deleteCommTask(appName string) error {
+
+	defer commTaskCtxMu.Unlock()
+
+	commTaskCtxMu.Lock()
+	if _, exists := commTaskCtxMap[appName]; !exists || appName == "" {
 		return errors.New("ctxMap already exists: " + appName)
 	}
-	commTaskCtxMap[appName] = ucl.NewCommTaskCtx(appName)
+	delete(commTaskCtxMap, appName)
 
 	return nil
 }
@@ -85,6 +103,22 @@ func isExistsCommTaskCtx(appName string) bool {
 	}
 
 	return true
+}
+
+func getRunningAppFromCommTaskCtxMap() []byte {
+
+	defer commTaskCtxMu.Unlock()
+
+	commTaskCtxMu.Lock()
+	var appList []byte
+	for appName := range commTaskCtxMap {
+		if len(appList) > 0 {
+			appList = append(appList, ',')
+		}
+		appList = append(appList, []byte(appName)...)
+	}
+
+	return appList
 }
 
 func isExistNode(dNodes []ucl.UclNode, chk ucl.UclNode) bool {
@@ -351,21 +385,21 @@ func handleNodeConnection(
 
 	conn, err := ucl.ConnectTarget(addr)
 	if err != nil {
-		ELog.Printf("ConnectTarget : %s\n", err)
+		ELog.Printf("(task=%s) ConnectTarget : %s\n", commTaskCtx.AppName, err)
 		return
 	}
-	ILog.Println("Dial connected to ", addr)
+	ILog.Printf("(task=%s) Dial connected to %s", commTaskCtx.AppName, addr)
 	defer conn.Close()
 
 	err = ucl.SendCommand(conn, ucl.CMD_DistribComm, command)
 	if err != nil {
-		ELog.Printf("sendCommand : %s\n", err)
+		ELog.Printf("(task=%s) sendCommand : %s\n", commTaskCtx.AppName, err)
 		return
 	}
 
 	err = ucl.WaitMagicCode(conn)
 	if err != nil {
-		ELog.Printf("WaitMagicCode : %s\n", err)
+		ELog.Printf("(task=%s) WaitMagicCode : %s\n", commTaskCtx.AppName, err)
 		return
 	}
 
@@ -390,7 +424,7 @@ LOOP:
 			}
 			err = ucl.ConnWriteWithSize(conn, sendMsg)
 			if err != nil {
-				ELog.Printf("ERR ConnWriteWithSize : %s\n", err)
+				ELog.Printf("(task=%s) ERR ConnWriteWithSize : %s\n", commTaskCtx.AppName, err)
 				break LOOP
 			}
 
@@ -407,7 +441,7 @@ LOOP:
 					break LOOP
 				}
 			} else {
-				ILog.Printf("Disconnected from the Node side")
+				ILog.Printf("(task=%s) Disconnected from the Node side", commTaskCtx.AppName)
 				commTaskCtx.Cancel()
 				break LOOP
 			}
@@ -503,15 +537,15 @@ func getAppInfoFromNode(
 	DLog.Printf("getAppInfoFromNode targetAddr: %s \n", addr)
 	conn, err := ucl.ConnectTarget(addr)
 	if err != nil {
-		ELog.Printf("ConnectTarget : %s\n", err)
+		ELog.Printf("getAppInfo ConnectTarget : %s\n", err)
 		return
 	}
-	ILog.Println("Dial connected to ", addr)
+	ILog.Println("getAppInfo Dial connected to ", addr)
 	defer conn.Close()
 
 	err = ucl.SendCommand(conn, comm, data)
 	if err != nil {
-		ELog.Printf("SendCommand : %s\n", err)
+		ELog.Printf("getAppInfo SendCommand : %s\n", err)
 		return
 	}
 
@@ -521,13 +555,13 @@ func getAppInfoFromNode(
 		DLog.Printf("Termination from launcer : %s \n", err)
 		rcvDataCh <- nil
 	} else {
-		rcvDataCh <- readBuf
 		DLog.Printf("resp from Node: %s \n", readBuf)
+		rcvDataCh <- readBuf
 	}
 
 }
 
-func getAppCmdFromEachNode(appName string, mJson map[string]interface{}) []byte {
+func getAppCmdFromEachNode(appName string) []byte {
 
 	fNodes := ucl.GetFrameworkNode(gVScrnDef)
 	DLog.Println("GetFrameworkNode ", fNodes)
@@ -552,14 +586,7 @@ func getAppCmdFromEachNode(appName string, mJson map[string]interface{}) []byte 
 	return appCommand
 }
 
-func getAppCmd(appName string, data []byte) []byte {
-
-	mJson := make(map[string]interface{})
-	err := json.Unmarshal(data, &mJson)
-	if err != nil {
-		ELog.Printf("Unmarshal json command error: %s \n", err)
-		return nil
-	}
+func getAppCmd(appName string) []byte {
 
 	var command []byte
 	if appName == "manageCompositors" {
@@ -569,12 +596,7 @@ func getAppCmd(appName string, data []byte) []byte {
 			return nil
 		}
 	} else {
-		if mJson["format_v1"].(map[string]interface{})["command_type"] != nil {
-			if mJson["format_v1"].(map[string]interface{})["command_type"].(string) != "get_app_command_and_run" {
-				return data
-			}
-		}
-		command = getAppCmdFromEachNode(appName, mJson)
+		command = getAppCmdFromEachNode(appName)
 		if command == nil {
 			ELog.Printf("getAppCmdFromEachNode error")
 			return nil
@@ -585,7 +607,7 @@ func getAppCmd(appName string, data []byte) []byte {
 
 }
 
-func getAppListFromEachNode(appName string, mJson map[string]interface{}) []byte {
+func getAppListFromEachNode() []byte {
 
 	fNodes := ucl.GetFrameworkNode(gVScrnDef)
 	DLog.Println("GetFrameworkNode ", fNodes)
@@ -612,56 +634,33 @@ func getAppListFromEachNode(appName string, mJson map[string]interface{}) []byte
 		}
 	}
 
+	//Remove duplicate information
+	if appList != nil {
+		parts := bytes.Split(appList, []byte{','})
+		seen := make(map[string]struct{}, len(parts))
+		var out [][]byte
+		for _, p := range parts {
+			key := string(p)
+			if _, exists := seen[key]; !exists {
+				seen[key] = struct{}{}
+				out = append(out, p)
+			}
+		}
+		appList = bytes.Join(out, []byte{','})
+	}
+
 	return appList
 }
 
-func getExecutableAppList(appName string, data []byte) []byte {
+func dispatchCommToNodes(command []byte, commTaskCtx *ucl.CommTaskContext) {
 
-	mJson := make(map[string]interface{})
-	err := json.Unmarshal(data, &mJson)
-	if err != nil {
-		ELog.Printf("Unmarshal json command error: %s \n", err)
-		return nil
-	}
-
-	var appList []byte
-	if appName == "getAppList" {
-		appList = getAppListFromEachNode(appName, mJson)
-		if appList == nil {
-			return []byte("AppName:")
-		}
-	} else {
-		return nil
-	}
-
-	return append([]byte("AppName:"), appList...)
-}
-
-func dispatchCommToNodes(conn net.Conn, data []byte, commTaskCtx *ucl.CommTaskContext) {
-
-	defer func() {
-		if conn != nil {
-			conn.Close()
-		}
-		delete(commTaskCtxMap, commTaskCtx.AppName)
-	}()
-
-	appList := getExecutableAppList(commTaskCtx.AppName, data)
-	if appList != nil {
-		ucl.ResponseStatus(conn, string(appList))
-		return
-	}
-
-	command := getAppCmd(commTaskCtx.AppName, data)
-	if command == nil {
-		ELog.Printf("No json command error")
-		return
-	}
+	defer deleteCommTask(commTaskCtx.AppName)
 
 	mJson := make(map[string]interface{})
 	err := json.Unmarshal(command, &mJson)
 	if err != nil {
 		ELog.Printf("Unmarshal json command error: %s \n", err)
+		commTaskCtx.Cancel()
 		return
 	}
 
@@ -674,6 +673,7 @@ func dispatchCommToNodes(conn net.Conn, data []byte, commTaskCtx *ucl.CommTaskCo
 	err = removeDisconnectNode(mJson, cNodes)
 	if err != nil {
 		ELog.Printf("removeDisconnectNode: %s \n", err)
+		commTaskCtx.Cancel()
 		return
 	}
 	mJsonList, targetNum := splitCommandforEachNode(mJson)
@@ -695,25 +695,6 @@ func dispatchCommToNodes(conn net.Conn, data []byte, commTaskCtx *ucl.CommTaskCo
 		go handleNodeConnection(targetAddr, string(newCommand), sendNodeChans[i], waitNCountChan, commTaskCtx, &subWg)
 	}
 
-	/* distrib-com, ucl-dcm-api connection loop */
-	var rcvDcmChan chan []byte
-	if conn != nil {
-		rcvDcmChan = make(chan []byte, 1)
-		go ucl.ConnReadLoop(conn, rcvDcmChan)
-	} else {
-		rcvDcmChan = nil
-	}
-
-	select {
-	case <-commTaskCtx.Ctx.Done():
-		if conn != nil {
-			ucl.ResponseStatus(conn, ucl.STAT_ExecFin)
-		}
-	case <-rcvDcmChan:
-		ILog.Printf("Disconnected from the Dcm side")
-		commTaskCtx.Cancel()
-	}
-
 	subWg.Wait()
 }
 
@@ -732,99 +713,238 @@ func getAppName(data []byte) string {
 	return ""
 }
 
-func dispatchComm(conn net.Conn) error {
-
-	useConnInGoroutine := false
-	responseStatus := ucl.STAT_ExecErr
-	defer func() {
-		if !useConnInGoroutine {
-			ucl.ResponseStatus(conn, responseStatus)
-			conn.Close()
-		}
-	}()
-
-	commType, recvBuf, err := ucl.ReadCommand(conn)
-	if err != nil {
-		ELog.Printf("commType read err: %s", "command none")
-		return err
-	}
-	appName := getAppName(recvBuf)
-
-	switch string(commType) {
-	case ucl.CMD_RunAppAsync,
-		ucl.CMD_LaunchCompositorsAsync:
-
-		if err = updateCommTaskCtxMap(appName); err != nil {
-			return nil
-		}
-		go dispatchCommToNodes(nil, recvBuf, commTaskCtxMap[appName])
-
-		responseStatus = ucl.STAT_ExecSuccess
-
-	case ucl.CMD_DistribComm,
-		ucl.CMD_RunApp, ucl.CMD_RunAppAsyncCb,
-		ucl.CMD_LaunchCompositors, ucl.CMD_LaunchCompositorsAsyncCb:
-
-		if err = updateCommTaskCtxMap(appName); err != nil {
-			return nil
-		}
-		go dispatchCommToNodes(conn, recvBuf, commTaskCtxMap[appName])
-
-		/* conn.Close() execution in dispatchCommToNodes function */
-		useConnInGoroutine = true
-
-	case ucl.CMD_StopApp,
-		ucl.CMD_StopCompositors:
-		if err = cancelCommTaskCtx(appName); err == nil {
-			responseStatus = ucl.STAT_ExecFin
-		}
-
-	case ucl.CMD_StopAppAll:
-		CancelAllCommTaskCtxExceptCompositors()
-		responseStatus = ucl.STAT_ExecFin
-
-	case ucl.CMD_GetAppStatus:
-		if exists := isExistsCommTaskCtx(appName); exists {
-			responseStatus = ucl.STAT_AppRunning
-		} else {
-			responseStatus = ucl.STAT_AppStop
-		}
-
-	case ucl.CMD_GetExecutableAppList:
-		if err = updateCommTaskCtxMap(appName); err != nil {
-			return nil
-		}
-
-		go dispatchCommToNodes(conn, recvBuf, commTaskCtxMap[appName])
-
-		/* conn.Close() execution in dispatchCommToNodes function */
-		useConnInGoroutine = true
-
-	default:
-		ELog.Printf("commType invalid err: %s", commType)
-	}
-
-	return nil
+type server struct {
+	dcm.UnimplementedDcmServiceServer
 }
 
-func acceptLoop(listenAddr string) {
+func (s *server) DcmGetExecutableAppList(grpcCtx context.Context, req *dcm.Empty) (*dcm.Response, error) {
 
-	listener, err := net.Listen("tcp", listenAddr)
+	responseStatus := ucl.STAT_ExecErr
+	infoData := ""
+
+	appList := getAppListFromEachNode()
+	if appList != nil {
+		responseStatus = ucl.STAT_ExecFin
+		infoData = string(appList)
+	}
+
+	return &dcm.Response{Status: responseStatus, Info: infoData}, nil
+}
+
+func (s *server) DcmGetRunningAppList(grpcCtx context.Context, req *dcm.Empty) (*dcm.Response, error) {
+
+	responseStatus := ucl.STAT_ExecErr
+	infoData := ""
+
+	appList := getRunningAppFromCommTaskCtxMap()
+	if appList != nil {
+		responseStatus = ucl.STAT_ExecFin
+		infoData = string(appList)
+	}
+
+	return &dcm.Response{Status: responseStatus, Info: infoData}, nil
+}
+
+func (s *server) DcmGetAppStatus(grpcCtx context.Context, req *dcm.AppControlRequest) (*dcm.Response, error) {
+
+	responseStatus := ucl.STAT_ExecFin
+	responseInfo := ucl.STAT_AppStop
+
+	appName := req.GetAppName()
+	taskName := appName
+	if exists := isExistsCommTaskCtx(taskName); exists {
+		responseInfo = ucl.STAT_AppRunning
+	}
+
+	return &dcm.Response{Status: responseStatus, Info: responseInfo}, nil
+}
+
+func (s *server) DcmRunAppCommand(grpcCtx context.Context, req *dcm.AppCommandRequest) (*dcm.Response, error) {
+
+	responseStatus := ucl.STAT_ExecErr
+
+	appJson := req.GetAppJson()
+	appName := getAppName([]byte(appJson))
+	if appName == "" {
+		ELog.Printf("json command error")
+		return &dcm.Response{Status: responseStatus}, nil
+	}
+	taskName := appName
+
+	commTaskCtx, err := updateCommTaskCtxMap(taskName)
 	if err != nil {
-		ELog.Printf("Listen error: %s", err)
-		os.Exit(1)
+		responseStatus = ucl.STAT_ExecBusy
+		return &dcm.Response{Status: responseStatus}, nil
 	}
-	defer listener.Close()
 
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			ELog.Printf("Accept error: %s", err)
-			continue
-		}
-		DLog.Printf("socket accepted")
-		dispatchComm(conn)
+	command := []byte(appJson)
+	if command == nil {
+		ELog.Printf("No json command error")
+		deleteCommTask(taskName)
+		return &dcm.Response{Status: responseStatus}, nil
 	}
+
+	go dispatchCommToNodes(command, commTaskCtx)
+
+	select {
+	case <-commTaskCtx.Ctx.Done():
+		responseStatus = ucl.STAT_ExecFin
+
+	case <-grpcCtx.Done():
+		responseStatus = ucl.STAT_ExecFin
+		commTaskCtx.Cancel()
+	}
+
+	return &dcm.Response{Status: responseStatus}, nil
+
+}
+
+func (s *server) DcmRunApp(grpcCtx context.Context, req *dcm.AppControlRequest) (*dcm.Response, error) {
+
+	responseStatus := ucl.STAT_ExecErr
+
+	appName := req.GetAppName()
+	taskName := appName
+	commTaskCtx, err := updateCommTaskCtxMap(taskName)
+	if err != nil {
+		responseStatus = ucl.STAT_ExecBusy
+		return &dcm.Response{Status: responseStatus}, nil
+	}
+
+	command := getAppCmd(appName)
+	if command == nil {
+		ELog.Printf("(task=%s) json command not found", taskName)
+		deleteCommTask(taskName)
+		return &dcm.Response{Status: responseStatus}, nil
+	}
+
+	go dispatchCommToNodes(command, commTaskCtx)
+
+	select {
+	case <-commTaskCtx.Ctx.Done():
+		responseStatus = ucl.STAT_ExecFin
+
+	case <-grpcCtx.Done():
+		responseStatus = ucl.STAT_ExecFin
+		commTaskCtx.Cancel()
+	}
+
+	return &dcm.Response{Status: responseStatus}, nil
+}
+
+func (s *server) DcmRunAppAsync(grpcCtx context.Context, req *dcm.AppControlRequest) (*dcm.Response, error) {
+
+	responseStatus := ucl.STAT_ExecSuccess
+
+	appName := req.GetAppName()
+	taskName := appName
+	commTaskCtx, err := updateCommTaskCtxMap(taskName)
+	if err != nil {
+		responseStatus = ucl.STAT_ExecBusy
+		return &dcm.Response{Status: responseStatus}, nil
+	}
+
+	command := getAppCmd(appName)
+	if command == nil {
+		ELog.Printf("(task=%s) json command not found", taskName)
+		deleteCommTask(taskName)
+		return &dcm.Response{Status: responseStatus}, nil
+	}
+
+	go dispatchCommToNodes(command, commTaskCtx)
+
+	return &dcm.Response{Status: responseStatus}, nil
+
+}
+
+func (s *server) DcmStopApp(grpcCtx context.Context, req *dcm.AppControlRequest) (*dcm.Response, error) {
+
+	responseStatus := ucl.STAT_ExecErr
+
+	taskName := req.GetAppName()
+
+	if err := cancelCommTaskCtx(taskName); err == nil {
+		responseStatus = ucl.STAT_ExecFin
+	}
+
+	return &dcm.Response{Status: responseStatus}, nil
+}
+
+func (s *server) DcmStopAppAll(grpcCtx context.Context, req *dcm.Empty) (*dcm.Response, error) {
+
+	CancelAllCommTaskCtxExceptCompositors()
+	responseStatus := ucl.STAT_ExecFin
+
+	return &dcm.Response{Status: responseStatus}, nil
+}
+
+func (s *server) DcmLaunchCompositor(grpcCtx context.Context, req *dcm.Empty) (*dcm.Response, error) {
+
+	responseStatus := ucl.STAT_ExecErr
+
+	appName := "manageCompositors"
+	taskName := appName
+	commTaskCtx, err := updateCommTaskCtxMap(taskName)
+	if err != nil {
+		responseStatus = ucl.STAT_ExecBusy
+		return &dcm.Response{Status: responseStatus}, nil
+	}
+
+	command := getAppCmd(appName)
+	if command == nil {
+		ELog.Printf("(task=%s) json command not found", taskName)
+		deleteCommTask(taskName)
+		return &dcm.Response{Status: responseStatus}, nil
+	}
+
+	go dispatchCommToNodes(command, commTaskCtx)
+
+	select {
+	case <-commTaskCtx.Ctx.Done():
+		responseStatus = ucl.STAT_ExecFin
+
+	case <-grpcCtx.Done():
+		responseStatus = ucl.STAT_ExecFin
+		commTaskCtx.Cancel()
+	}
+
+	return &dcm.Response{Status: responseStatus}, nil
+}
+
+func (s *server) DcmLaunchCompositorAsync(grpcCtx context.Context, req *dcm.Empty) (*dcm.Response, error) {
+
+	responseStatus := ucl.STAT_ExecSuccess
+
+	appName := "manageCompositors"
+	taskName := appName
+	commTaskCtx, err := updateCommTaskCtxMap(taskName)
+	if err != nil {
+		responseStatus = ucl.STAT_ExecBusy
+		return &dcm.Response{Status: responseStatus}, nil
+	}
+
+	command := getAppCmd(appName)
+	if command == nil {
+		ELog.Printf("(task=%s) json command not found", taskName)
+		deleteCommTask(taskName)
+		return &dcm.Response{Status: responseStatus}, nil
+	}
+
+	go dispatchCommToNodes(command, commTaskCtx)
+
+	return &dcm.Response{Status: responseStatus}, nil
+}
+
+func (s *server) DcmStopCompositor(grpcCtx context.Context, req *dcm.Empty) (*dcm.Response, error) {
+
+	responseStatus := ucl.STAT_ExecErr
+	taskName := "manageCompositors"
+
+	if err := cancelCommTaskCtx(taskName); err == nil {
+		responseStatus = ucl.STAT_ExecFin
+	}
+
+	return &dcm.Response{Status: responseStatus}, nil
 }
 
 func printUsage() {
@@ -873,5 +993,18 @@ func main() {
 
 	ILog.Printf("listenAddr=%s", listenAddr)
 
-	acceptLoop(listenAddr)
+	listener, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		ELog.Printf("Listen error: %s", err)
+		os.Exit(1)
+	}
+	defer listener.Close()
+
+	s := grpc.NewServer()
+	dcm.RegisterDcmServiceServer(s, &server{})
+	ILog.Println("gRPC Server listening on ", listenAddr)
+	if err := s.Serve(listener); err != nil {
+		ELog.Printf("Failed to serve: %v", err)
+		os.Exit(1)
+	}
 }

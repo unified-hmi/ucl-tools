@@ -15,8 +15,8 @@
         {"node_id": 1, "hostname": "host2", "ip": "192.168.0.101"}
     ],
     "distributed_window_system": {
-        "window_manager": {},
-	"ucl_lifecycle_manager" : {"node_id" : 0, "port": 6543},
+        "ucl_lifecycle_manager" : {"node_id" : 0, "port": 6543},
+        "ula_client_manager" : {"node_id" : 0, "port": 6443},
         "framework_node": [
             {"node_id": 0, "ula": {"debug": false, "debug_port": 8080, "port": 10100}, "ucl_node": {"port": 7654}},
             {"node_id": 1, "ula": {"debug": false, "debug_port": 8080, "port": 10100}, "ucl_node": {"port": 7654}}

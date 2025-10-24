@@ -25,17 +25,27 @@ import (
 )
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, "Usage:\n")
-	fmt.Fprintf(os.Stderr, " %s [OPTIONS]\n\n", os.Args[0])
 
-	fmt.Fprintf(os.Stderr, "Options:\n")
-	fmt.Fprintf(os.Stderr, "  -c\tSpecify a DCM API command (default: none)\n")
-	fmt.Fprintf(os.Stderr, "\tget_app_list \n")
-	fmt.Fprintf(os.Stderr, "\tlaunch_compositor \n")
-	fmt.Fprintf(os.Stderr, "\tstop_compositor   \n")
-	fmt.Fprintf(os.Stderr, "\trun               <appName>\n")
-	fmt.Fprintf(os.Stderr, "\tstop              <appName>\n")
-	fmt.Fprintf(os.Stderr, "  -h\tShow this message\n")
+	usage := `
+Usage: 
+  ucl-api-comm [OPTIONS]
+
+Options:
+  -c    Specify a DCM API command (default: none)
+        get_app_list 
+        get_running_app_list
+        get_app_status          <appName>
+        launch_compositor 
+        launch_compositor_async 
+        stop_compositor
+        run_command             <filePath>
+        run                     <appName>
+        run_async               <appName>
+        stop                    <appName>
+        stop_all
+  -h    Show this message
+`
+	fmt.Println(usage)
 }
 
 func main() {
@@ -45,35 +55,52 @@ func main() {
 	flag.StringVar(&command, "c", "", "Specify a dcm api command (default: none)")
 	flag.Parse()
 
-	var appName string
+	var arg0 string
 	var val int
 
 	flagCnt := len(flag.Args())
 	if flagCnt > 0 {
-		appName = flag.Arg(0)
+		arg0 = flag.Arg(0)
 	}
 
 	switch command {
 	case "launch_compositor":
-		val = dcmapi.DcmLaunchCompositor()
+		val = dcmapi.DcmClientLaunchCompositor()
+
 	case "launch_compositor_async":
-		val = dcmapi.DcmLaunchCompositorAsync()
+		val = dcmapi.DcmClientLaunchCompositorAsync()
+
 	case "stop_compositor":
-		val = dcmapi.DcmStopCompositor()
+		val = dcmapi.DcmClientStopCompositor()
+
+	case "run_command":
+		val = dcmapi.DcmClientRunAppCommand(arg0)
+
 	case "run":
-		val = dcmapi.DcmRunApp(appName)
+		val = dcmapi.DcmClientRunApp(arg0)
+
 	case "run_async":
-		val = dcmapi.DcmRunAppAsync(appName)
+		val = dcmapi.DcmClientRunAppAsync(arg0)
+
 	case "stop":
-		val = dcmapi.DcmStopApp(appName)
+		val = dcmapi.DcmClientStopApp(arg0)
+
 	case "stop_all":
-		val = dcmapi.DcmStopAppAll()
+		val = dcmapi.DcmClientStopAppAll()
+
 	case "get_app_status":
-		val = dcmapi.DcmGetAppStatus(appName)
+		val = dcmapi.DcmClientGetAppStatus(arg0)
+
 	case "get_app_list":
-		list := dcmapi.DcmGetExecutableAppList()
+		list := dcmapi.DcmClientGetExecutableAppList()
 		fmt.Fprintf(os.Stderr, "appList: %s\n", list)
 		val = 0
+
+	case "get_running_app_list":
+		list := dcmapi.DcmClientGetRunningAppList()
+		fmt.Fprintf(os.Stderr, "runningAppList: %s\n", list)
+		val = 0
+
 	default:
 		val = -1
 	}

@@ -22,7 +22,6 @@ GOBUILDFLAGS?=-v
 
 THIS_DIR=.
 MODULES=ucl-node \
-	ucl-distrib-com \
 	ucl-virtio-gpu-wl-send \
 	ucl-virtio-gpu-wl-recv \
 	ucl-virtio-gpu-rvgpu-compositor \

@@ -46,7 +46,7 @@ func NcountMaster(
 
 	defer wg.Done()
 
-	ILog.Printf("Waiting for nCount from (%d) targets...\n", numWorker)
+	ILog.Printf("(task=%s) Waiting for nCount from (%d) targets...", commTaskCtx.AppName, numWorker)
 
 	connected := 0
 	t := time.NewTicker(10 * time.Second)
@@ -56,7 +56,7 @@ LOOP:
 	for {
 		select {
 		case <-commTaskCtx.Ctx.Done():
-			ELog.Printf("close go routine")
+			ELog.Printf("(task=%s) NcountMaster close", commTaskCtx.AppName)
 			return
 
 		case <-waitNCountChan:
@@ -65,8 +65,9 @@ LOOP:
 				break LOOP
 			}
 		case <-t.C:
+			ELog.Printf("(task=%s) WatchDog Worker is insufficient(%d < %d)", commTaskCtx.AppName, connected, numWorker)
+
 			commTaskCtx.Cancel()
-			ELog.Printf("WatchDog Worker is insufficient(%d < %d)", connected, numWorker)
 			return
 		}
 	}
@@ -80,7 +81,7 @@ LOOP:
 		sendNodeChan <- sendMsg
 	}
 
-	ILog.Printf("nCount completed for (%d) targets.", numWorker)
+	ILog.Printf("(task=%s) nCount completed for (%d) targets.", commTaskCtx.AppName, numWorker)
 }
 
 func ncountWorker(
@@ -103,15 +104,16 @@ func ncountWorker(
 	select {
 	case recvMsg := <-waitNCountChan:
 		if !reflect.DeepEqual(recvMsg, sendMsg) {
-			ILog.Println("nCount reflect.DeepEqual ERR")
+			ILog.Printf("(task=%s) nCount reflect.DeepEqual ERR", commTaskCtx.AppName)
 			commTaskCtx.Cancel()
 			return errors.New(fmt.Sprintf("magic code mismatch"))
 		}
 	case <-commTaskCtx.Ctx.Done():
+		ELog.Printf("(task=%s) ncountWorker close", commTaskCtx.AppName)
 		return errors.New(fmt.Sprintf("other reason"))
 	}
 
-	ILog.Println("nCount replay OK from Master")
+	ILog.Printf("(task=%s) nCount completed from Master", commTaskCtx.AppName)
 	return nil
 }
 
@@ -141,6 +143,7 @@ func NkeepMaster(
 	for {
 		select {
 		case <-commTaskCtx.Ctx.Done():
+			ILog.Printf("(task=%s) NkeepMaster close", commTaskCtx.AppName)
 			return
 
 		case <-sendt.C:
@@ -148,7 +151,7 @@ func NkeepMaster(
 			recvt = time.NewTicker(timeoutInterval)
 
 		case <-recvt.C:
-			ELog.Printf("nkeepMaster CheckAlive Timeout: No response")
+			ELog.Printf("(task=%s) NkeepMaster CheckAlive Timeout: No response", commTaskCtx.AppName)
 			commTaskCtx.Cancel()
 			return
 
@@ -181,7 +184,7 @@ func NkeepWorker(
 	for {
 		select {
 		case <-commTaskCtx.Ctx.Done():
-			ILog.Println("connectionLoop ERR")
+			ILog.Printf("(task=%s) NkeepWorker close", commTaskCtx.AppName)
 			return nil
 
 		case <-waitNKeepChan:
@@ -202,6 +205,7 @@ func processExitHandler(
 	for {
 		select {
 		case <-commTaskCtx.Ctx.Done():
+			ILog.Printf("(task=%s) start ExitHandler for process(pid:%d) \n", commTaskCtx.AppName, pid)
 			watchDogKill(pid, true)
 			return
 		}
@@ -216,11 +220,11 @@ func waitProcess(
 	defer wg.Done()
 
 	pid := cmd.Process.Pid
-	DLog.Printf("wait process(app=%s pid:%d)\n", commTaskCtx.AppName, pid)
+	DLog.Printf("(task=%s) wait process(pid:%d)\n", commTaskCtx.AppName, pid)
 	cmd.Wait()
 
 	commTaskCtx.Cancel()
-	ILog.Printf("finish process(app=%s pid:%d)\n", commTaskCtx.AppName, pid)
+	ILog.Printf("(task=%s) finish process(pid:%d)\n", commTaskCtx.AppName, pid)
 }
 
 type ExecCommInfo struct {
@@ -258,7 +262,7 @@ func TimingWrapper(
 	appCmd.Env = append(appCmd.Env, execCommInfo.ExecCommEnv...)
 	err = appCmd.Start()
 	if err != nil {
-		ILog.Println("appCmd Start error: ", err)
+		ILog.Printf("(task=%s) appCmd Start error: ", commTaskCtx.AppName, err)
 		commTaskCtx.Cancel()
 		return
 	}
@@ -275,8 +279,8 @@ func TimingWrapper(
 
 	subWg.Wait()
 	if execCommInfo.IsWaitDeps {
-		ILog.Println("timingSyncLaunch finish : ", commTaskCtx.AppName)
+		ILog.Printf("(task=%s) timingSyncLaunch finish", commTaskCtx.AppName)
 	} else {
-		ILog.Println("timingAsyncLaunch finish : ", commTaskCtx.AppName)
+		ILog.Printf("(task=%s) timingAsyncLaunch finish", commTaskCtx.AppName)
 	}
 }

@@ -46,30 +46,44 @@ func doCallbackFunc(callBackFunc unsafe.Pointer, argPointer unsafe.Pointer) {
 	Mutex.Unlock()
 }
 
-var lastAllocated unsafe.Pointer
+var lastAllocated1 unsafe.Pointer
+var lastAllocated2 unsafe.Pointer
 
 //export dcm_free_executable_app_list
 func dcm_free_executable_app_list() {
 	Mutex.Lock()
 	defer Mutex.Unlock()
-	if lastAllocated != nil {
-		C.free(lastAllocated)
-		lastAllocated = nil
+	if lastAllocated1 != nil {
+		C.free(lastAllocated1)
+		lastAllocated1 = nil
 	}
 }
 
-func allocAndKeep(data []byte) (*C.char, C.int) {
+//export dcm_free_running_app_list
+func dcm_free_running_app_list() {
+	Mutex.Lock()
+	defer Mutex.Unlock()
+	if lastAllocated2 != nil {
+		C.free(lastAllocated2)
+		lastAllocated2 = nil
+	}
+}
+
+func allocAndKeep(lastAllocated unsafe.Pointer, data []byte) (*C.char, C.int) {
 	n := len(data)
 	if n == 0 {
 		return nil, 0
 	}
 
-	ptr := C.malloc(C.size_t(n))
+	ptr := C.malloc(C.size_t(n + 1))
 	if ptr == nil {
 		return nil, 0
 	}
 
 	C.memcpy(ptr, unsafe.Pointer(&data[0]), C.size_t(n))
+
+	endPtr := unsafe.Pointer(uintptr(ptr) + uintptr(n))
+	*((*C.char)(endPtr)) = 0
 
 	Mutex.Lock()
 	lastAllocated = ptr
@@ -83,8 +97,20 @@ func dcm_get_executable_app_list(length *C.int) *C.char {
 
 	dcm_free_executable_app_list()
 
-	val := dcmapi.DcmGetExecutableAppList()
-	cstr, clen := allocAndKeep(val)
+	val := dcmapi.DcmClientGetExecutableAppList()
+	cstr, clen := allocAndKeep(lastAllocated1, val)
+	*length = clen
+
+	return cstr
+}
+
+//export dcm_get_running_app_list
+func dcm_get_running_app_list(length *C.int) *C.char {
+
+	dcm_free_running_app_list()
+
+	val := dcmapi.DcmClientGetRunningAppList()
+	cstr, clen := allocAndKeep(lastAllocated2, val)
 	*length = clen
 
 	return cstr
@@ -94,9 +120,19 @@ func dcm_get_executable_app_list(length *C.int) *C.char {
 func dcm_get_app_status(appNameChar *C.char) C.int {
 	appName := C.GoString(appNameChar)
 
-	val := dcmapi.DcmGetAppStatus(appName)
+	val := dcmapi.DcmClientGetAppStatus(appName)
 
 	//1 = run, 0 = stop, -1 = fail
+	return C.int(val)
+}
+
+//export dcm_run_app_command
+func dcm_run_app_command(commandFilePathChar *C.char) C.int {
+	commandFilePath := C.GoString(commandFilePathChar)
+
+	val := dcmapi.DcmClientRunAppCommand(commandFilePath)
+
+	//0 = end_ok, -1 = end_fail
 	return C.int(val)
 }
 
@@ -104,7 +140,7 @@ func dcm_get_app_status(appNameChar *C.char) C.int {
 func dcm_run_app(appNameChar *C.char) C.int {
 	appName := C.GoString(appNameChar)
 
-	val := dcmapi.DcmRunApp(appName)
+	val := dcmapi.DcmClientRunApp(appName)
 
 	//0 = end_ok, -1 = end_fail
 	return C.int(val)
@@ -114,7 +150,7 @@ func dcm_run_app(appNameChar *C.char) C.int {
 func dcm_run_app_async(appNameChar *C.char) C.int {
 	appName := C.GoString(appNameChar)
 
-	val := dcmapi.DcmRunAppAsync(appName)
+	val := dcmapi.DcmClientRunAppAsync(appName)
 
 	//1 = start, 0 = end_ok, -1 = end_fail
 	return C.int(val)
@@ -125,7 +161,7 @@ func dcm_run_app_async_cb(appNameChar *C.char, callback unsafe.Pointer, argPoint
 	callBackFunc := (unsafe.Pointer)(callback)
 	appName := C.GoString(appNameChar)
 
-	go dcmapi.DcmRunAppAsyncCb(appName, doCallbackFunc, callBackFunc, argPointer)
+	go dcmapi.DcmClientRunAppAsyncCb(appName, doCallbackFunc, callBackFunc, argPointer)
 
 	return 0
 }
@@ -134,7 +170,7 @@ func dcm_run_app_async_cb(appNameChar *C.char, callback unsafe.Pointer, argPoint
 func dcm_stop_app(appNameChar *C.char) C.int {
 	appName := C.GoString(appNameChar)
 
-	val := dcmapi.DcmStopApp(appName)
+	val := dcmapi.DcmClientStopApp(appName)
 
 	//0 = end_ok, -1 = end_fail
 	return C.int(val)
@@ -143,7 +179,7 @@ func dcm_stop_app(appNameChar *C.char) C.int {
 //export dcm_stop_app_all
 func dcm_stop_app_all() C.int {
 
-	val := dcmapi.DcmStopAppAll()
+	val := dcmapi.DcmClientStopAppAll()
 
 	//0 = end_ok, -1 = end_fail
 	return C.int(val)
@@ -152,7 +188,7 @@ func dcm_stop_app_all() C.int {
 //export dcm_launch_compositor
 func dcm_launch_compositor() C.int {
 
-	val := dcmapi.DcmLaunchCompositor()
+	val := dcmapi.DcmClientLaunchCompositor()
 
 	//0 = end_ok, -1 = end_fail
 	return C.int(val)
@@ -161,7 +197,7 @@ func dcm_launch_compositor() C.int {
 //export dcm_launch_compositor_async
 func dcm_launch_compositor_async() C.int {
 
-	val := dcmapi.DcmLaunchCompositorAsync()
+	val := dcmapi.DcmClientLaunchCompositorAsync()
 
 	//1 = start, 0 = end_ok, -1 = end_fail
 	return C.int(val)
@@ -172,7 +208,7 @@ func dcm_launch_compositor_async() C.int {
 func dcm_launch_compositor_async_cb(callback unsafe.Pointer, argPointer unsafe.Pointer) C.int {
 	callBackFunc := (unsafe.Pointer)(callback)
 
-	go dcmapi.DcmLaunchCompositorAsyncCb(doCallbackFunc, callBackFunc, argPointer)
+	go dcmapi.DcmClientLaunchCompositorAsyncCb(doCallbackFunc, callBackFunc, argPointer)
 
 	return 0
 }
@@ -180,7 +216,7 @@ func dcm_launch_compositor_async_cb(callback unsafe.Pointer, argPointer unsafe.P
 //export dcm_stop_compositor
 func dcm_stop_compositor() C.int {
 
-	val := dcmapi.DcmStopCompositor()
+	val := dcmapi.DcmClientStopCompositor()
 
 	//0 = ok, -1 = fail
 	return C.int(val)
