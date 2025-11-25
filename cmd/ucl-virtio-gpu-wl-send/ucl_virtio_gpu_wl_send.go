@@ -260,9 +260,9 @@ func unlockFile(file *os.File) {
 	file.Close()
 }
 
-func setExecCommSetting(cmd *exec.Cmd, envs []string) {
+func setExecCommSetting(cmd *exec.Cmd, envs []string, setpgid bool) {
 	cmd.Env = os.Environ()
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: setpgid}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -375,7 +375,7 @@ func main() {
 
 	rvgpuProxyCmd = exec.Command("rvgpu-proxy", rvgpuOptions...)
 
-	setExecCommSetting(rvgpuProxyCmd, nil)
+	setExecCommSetting(rvgpuProxyCmd, nil, true)
 
 	err = rvgpuProxyCmd.Start()
 	if err != nil {
@@ -420,7 +420,7 @@ func main() {
 	wlProxyEnv = append(wlProxyEnv, "MESA_LOADER_DRIVER_OVERRIDE=virtio_gpu")
 	wlProxyEnv = append(wlProxyEnv, "XDG_RUNTIME_DIR="+xdgRuntimeDir)
 
-	setExecCommSetting(wlProxyCmd, wlProxyEnv)
+	setExecCommSetting(wlProxyCmd, wlProxyEnv, true)
 
 	err = wlProxyCmd.Start()
 	if err != nil {
@@ -437,11 +437,12 @@ func main() {
 	}
 
 	rvgpuAppCmd = exec.Command(targetApp, appOptions...)
+	rvgpuAppCmd.Stdin = os.Stdin
 	rvgpuAppEnv = append(rvgpuAppEnv, "__GLX_VENDOR_LIBRARY_NAME=mesa")
 	rvgpuAppEnv = append(rvgpuAppEnv, "MESA_LOADER_DRIVER_OVERRIDE=virtio_gpu")
 	rvgpuAppEnv = append(rvgpuAppEnv, "XDG_RUNTIME_DIR="+xdgRuntimeDir)
 	rvgpuAppEnv = append(rvgpuAppEnv, "WAYLAND_DISPLAY="+wlSocketName)
-	setExecCommSetting(rvgpuAppCmd, rvgpuAppEnv)
+	setExecCommSetting(rvgpuAppCmd, rvgpuAppEnv, false)
 
 	err = rvgpuAppCmd.Start()
 	if err != nil {
